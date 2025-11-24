@@ -1,0 +1,73 @@
+import gzip
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+from collections import Counter
+
+ref_map = {}
+with open("reference.hist", "r") as fh:
+    for ln in fh:
+        a, b = ln.strip().split()
+        ref_map[int(a)] = float(b)
+
+max_len = max(ref_map)
+ref_vec = np.zeros(max_len + 1)
+for length, freq in ref_map.items():
+    ref_vec[length] = freq
+
+qlens = []
+
+with gzip.open("query.bed.gz", "rt") as fh:
+    for ln in fh:
+        cols = ln.split()
+        if len(cols) < 3:
+            continue
+        st = int(cols[1])
+        en = int(cols[2])
+        L = en - st
+        if L <= max_len:
+            qlens.append(L)
+
+qlens = np.array(qlens)
+
+uniq, cnts = np.unique(qlens, return_counts=True)
+qcount = np.zeros(max_len + 1)
+qcount[uniq] = cnts
+
+qfreq = qcount / qcount.sum()
+keep_prob = np.zeros(max_len + 1)
+mask = qfreq > 0
+keep_prob[mask] = np.minimum(1.0, ref_vec[mask] / qfreq[mask])
+rescaled = []
+
+with gzip.open("query.bed.gz", "rt") as fh:
+    for ln in fh:
+        cols = ln.split()
+        if len(cols) < 3:
+            continue
+        st = int(cols[1])
+        en = int(cols[2])
+        L = en - st
+        if L <= max_len and random.random() <= keep_prob[L]:
+            rescaled.append(L)
+
+rescaled = np.array(rescaled)
+bins = np.arange(0, max_len + 1)
+
+h_query = np.bincount(qlens, minlength=max_len + 1)
+h_new = np.bincount(rescaled, minlength=max_len + 1)
+
+h_query = h_query / h_query.sum()
+h_new = h_new / h_new.sum()
+
+plt.figure(figsize=(12, 5), dpi=120)
+
+plt.plot(bins, h_query, label=f"Query (n = {len(qlens):,})", color="purple")
+plt.plot(bins, ref_vec, label="Reference", color="green")
+plt.plot(bins, h_new, label=f"Rescaled (n = {len(rescaled):,})", color="cyan")
+
+plt.xlabel("Fragment Length")
+plt.ylabel("Normalized Frequency")
+plt.legend()
+plt.tight_layout()
+plt.show()
